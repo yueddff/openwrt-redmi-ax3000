@@ -14,11 +14,9 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo add-apt-repository ppa:npalix/coccinelle
+          # sudo add-apt-repository ppa:npalix/coccinelle  # 已移除
           sudo apt update
-          sudo apt install build-essential clang flex g++ gawk gcc-multilib gettext \
-            git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
-            coccinelle
+          sudo apt install build-essential clang flex ... coccinelle
 
       - name: Checkout
         uses: actions/checkout@v3
