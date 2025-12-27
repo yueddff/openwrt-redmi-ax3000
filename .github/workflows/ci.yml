@@ -84,20 +84,24 @@ jobs:
           make -j$(nproc) IGNORE_ERRORS=1
 
       - name: Upload bin to artifacts
-        uses: actions/upload-artifact@v3
+        # 修改点：升级至v4，并添加if:always()确保构建出错时仍上传
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: bin-ipq50xx-arm
           path: bin/targets/ipq50xx/arm/*
 
       - name: Upload dl to artifacts
-        uses: actions/upload-artifact@v3
+        # 修改点：升级至v4，并添加if:always()
+        uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: dl
           path: dl/*
 
   gh-pages:
     needs: [ build ]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04 # 修改点：将运行环境从20.04升级到22.04
     permissions:
       contents: write
     steps:
@@ -124,7 +128,8 @@ jobs:
           git rebase --continue
 
       - name: Download bin from artifacts
-        uses: actions/download-artifact@v3
+        # 修改点：升级至v4
+        uses: actions/download-artifact@v4
         with:
           name: bin-ipq50xx-arm
           path: bin/
@@ -148,7 +153,7 @@ jobs:
 
   release:
     needs: [ build ]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04 # 修改点：将运行环境从20.04升级到22.04
     permissions:
       contents: write
     steps:
@@ -156,13 +161,15 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Download dl from artifacts
-        uses: actions/download-artifact@v3
+        # 修改点：升级至v4
+        uses: actions/download-artifact@v4
         with:
           name: dl
           path: dl/
 
       - name: Download bin from artifacts
-        uses: actions/download-artifact@v3
+        # 修改点：升级至v4
+        uses: actions/download-artifact@v4
         with:
           name: bin-ipq50xx-arm
           path: bin/targets/ipq50xx/arm/
