@@ -14,18 +14,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # sudo add-apt-repository ppa:npalix/coccinelle  # 已移除
           sudo apt update
-          sudo apt install build-essential clang flex ... coccinelle
+          # 关键修复：使用完整、正确的包列表，移除了导致错误的 `...`
+          sudo apt install -y build-essential clang flex g++ gawk gcc-multilib gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev coccinelle
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Hook the openwrt_core URL for opkg
         run: |
           OWNER="${GITHUB_REPOSITORY%%/*}"
           REPO="${GITHUB_REPOSITORY#*/}"
-          TIME="$(curl "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" | jq -r .created_at)"
+          TIME="$(curl -s "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" | jq -r .created_at)"
 
           echo "ci-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S')-${GITHUB_SHA:0:8}" >version
           sed -i "s|%U/targets/%S/packages|https://${OWNER}.github.io/${REPO}/${GITHUB_REF_NAME}/%R|" include/feeds.mk
@@ -82,7 +82,6 @@ jobs:
           make -j$(nproc) IGNORE_ERRORS=1
 
       - name: Upload bin to artifacts
-        # 修改点：升级至v4，并添加if:always()确保构建出错时仍上传
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -90,7 +89,6 @@ jobs:
           path: bin/targets/ipq50xx/arm/*
 
       - name: Upload dl to artifacts
-        # 修改点：升级至v4，并添加if:always()
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -99,12 +97,12 @@ jobs:
 
   gh-pages:
     needs: [ build ]
-    runs-on: ubuntu-22.04 # 修改点：将运行环境从20.04升级到22.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - name: Checkout gh-pages
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           path: 'gh-pages'
           ref: 'gh-pages'
@@ -126,7 +124,6 @@ jobs:
           git rebase --continue
 
       - name: Download bin from artifacts
-        # 修改点：升级至v4
         uses: actions/download-artifact@v4
         with:
           name: bin-ipq50xx-arm
@@ -151,22 +148,20 @@ jobs:
 
   release:
     needs: [ build ]
-    runs-on: ubuntu-22.04 # 修改点：将运行环境从20.04升级到22.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download dl from artifacts
-        # 修改点：升级至v4
         uses: actions/download-artifact@v4
         with:
           name: dl
           path: dl/
 
       - name: Download bin from artifacts
-        # 修改点：升级至v4
         uses: actions/download-artifact@v4
         with:
           name: bin-ipq50xx-arm
@@ -179,7 +174,7 @@ jobs:
 
       - name: Generate release informations
         run: |
-          TIME="$(curl "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" | jq -r .created_at)"
+          TIME="$(curl -s "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" | jq -r .created_at)"
 
           TAG="ci-${GITHUB_REF_NAME}-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S-%Z')"
           echo "TAG=$TAG" >>$GITHUB_ENV
