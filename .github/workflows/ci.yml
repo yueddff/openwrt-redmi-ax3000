@@ -23,16 +23,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex g++ gawk gcc-multilib gettext \
-            git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
+            git libncurses5-dev libssl-dev rsync unzip zlib1g-dev \
             python3 python3-pip python3-setuptools jq curl wget \
-            coccinelle  # 直接从官方仓库安装
+            coccinelle
 
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # 后续步骤保持不变...
 
       - name: Cache OpenWrt downloads
         uses: actions/cache@v4
@@ -52,10 +50,8 @@ jobs:
 
       - name: Setup feeds and version
         run: |
-          # 生成版本信息
           echo "ci-$(date -u +'%Y%m%d-%H%M%S')-${GITHUB_SHA:0:8}" > version
           
-          # 配置 feeds 使用 GitHub Pages
           if [ -f include/feeds.mk ]; then
             sed -i "s|%U/targets/%S/packages|${FEED_URL}/%R|g" include/feeds.mk
           fi
@@ -67,7 +63,6 @@ jobs:
 
       - name: Configure build
         run: |
-          # 生成配置
           cat > .config << 'EOF'
           CONFIG_TARGET_ipq50xx=y
           CONFIG_TARGET_ipq50xx_arm=y
@@ -130,7 +125,6 @@ jobs:
       contents: write
     env:
       BRANCH: ${{ github.ref_name }}
-      VERSION_FILE: bin/targets/ipq50xx/arm/version.buildinfo
     
     steps:
       - name: Checkout gh-pages branch
@@ -155,17 +149,12 @@ jobs:
         run: |
           cd gh-pages
           
-          # 获取版本信息
           BUILD_VERSION=$(cat "../artifacts/firmware/version.buildinfo" | head -1)
           ARCH="ipq50xx/arm"
           
-          # 创建目录结构
           mkdir -p "${BRANCH}/${BUILD_VERSION}/${ARCH}/"
-          
-          # 复制文件
           cp -r ../artifacts/packages/* "${BRANCH}/${BUILD_VERSION}/${ARCH}/"
           
-          # 更新索引文件
           if [ ! -f "${BRANCH}/index.html" ]; then
             cat > "${BRANCH}/index.html" << HTML
             <!DOCTYPE html>
@@ -177,10 +166,8 @@ jobs:
             HTML
           fi
           
-          # 更新索引
           echo "<li><a href=\"${BUILD_VERSION}/\">${BUILD_VERSION}</a> ($(date))</li>" >> "${BRANCH}/index.html"
           
-          # 保持最多10个版本
           ls -dt "${BRANCH}"/*/ 2>/dev/null | tail -n +11 | xargs rm -rf
 
       - name: Deploy to GitHub Pages
@@ -213,7 +200,6 @@ jobs:
           TAG_NAME="ci-${{ github.ref_name }}-$(date -d "${BUILD_TIME}" -u +'%Y%m%d-%H%M%S-UTC')"
           echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
           
-          # 生成 Release 说明
           cat > RELEASE_NOTES.md << 'EOF'
           # CI Build - ${{ github.ref_name }}
           
@@ -231,9 +217,9 @@ jobs:
           - NSS-PPPoE support
           
           ## Checksums
-          \`\`\`
+          ```
           $(cat release/sha256sums)
-          \`\`\`
+          ```
           
           ## Build Information
           $(cat release/feeds.buildinfo | awk -F'[ ^]' '{printf "- %s: `%s`\n", $2, $4}')
