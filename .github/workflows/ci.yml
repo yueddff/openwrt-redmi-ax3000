@@ -57,7 +57,7 @@ jobs:
             CONFIG_PACKAGE_kmod-bonding=y
             CONFIG_PACKAGE_kmod-qca-nss-ecm-standard=y
             CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
-            CONFIG_PACKAGE_kmod-ipt-ipse=y
+            CONFIG_PACKAGE_kmod-ipt-ipset=y
             CONFIG_PACKAGE_iptables-mod-ipopt=y
             CONFIG_PACKAGE_iptables-mod-conntrack-extra=y
 
