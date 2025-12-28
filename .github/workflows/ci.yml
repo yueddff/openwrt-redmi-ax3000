@@ -6,200 +6,248 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      OWNER: ${{ github.repository_owner }}
+      REPO_NAME: ${{ github.event.repository.name }}
+      FEED_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ github.ref_name }}
+    
     steps:
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android
 
-      - name: Install dependencies
+      - name: Setup environment
         run: |
-          sudo add-apt-repository ppa:npalix/coccinelle
-          sudo apt update
-          sudo apt install build-essential clang flex g++ gawk gcc-multilib gettext \
+          sudo add-apt-repository -y ppa:npalix/coccinelle
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex g++ gawk gcc-multilib gettext \
             git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
-            coccinelle
+            coccinelle jq curl
 
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Hook the openwrt_core URL for opkg
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-dl-
+
+      - name: Cache OpenWrt build cache
+        uses: actions/cache@v4
+        with:
+          path: build_dir
+          key: ${{ runner.os }}-openwrt-build-${{ hashFiles('.config', 'feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-build-
+
+      - name: Setup feeds and version
         run: |
-          OWNER="${GITHUB_REPOSITORY%%/*}"
-          REPO="${GITHUB_REPOSITORY#*/}"
-          TIME="$(curl "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" | jq -r .created_at)"
-
-          echo "ci-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S')-${GITHUB_SHA:0:8}" >version
-          sed -i "s|%U/targets/%S/packages|https://${OWNER}.github.io/${REPO}/${GITHUB_REF_NAME}/%R|" include/feeds.mk
+          # 生成版本信息
+          echo "ci-$(date -u +'%Y%m%d-%H%M%S')-${GITHUB_SHA:0:8}" > version
+          
+          # 配置 feeds 使用 GitHub Pages
+          if [ -f include/feeds.mk ]; then
+            sed -i "s|%U/targets/%S/packages|${FEED_URL}/%R|g" include/feeds.mk
+          fi
 
       - name: Update and install feeds
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Configure
+      - name: Configure build
         run: |
-          cat <<EOF | sed -E 's/^  //' >.config
-            CONFIG_TARGET_ipq50xx=y
-            CONFIG_TARGET_ipq50xx_arm=y
-            CONFIG_TARGET_MULTI_PROFILE=y
-            CONFIG_TARGET_ALL_PROFILES=y
-            CONFIG_TARGET_PER_DEVICE_ROOTFS=y
+          # 生成配置
+          cat > .config << 'EOF'
+          CONFIG_TARGET_ipq50xx=y
+          CONFIG_TARGET_ipq50xx_arm=y
+          CONFIG_TARGET_MULTI_PROFILE=y
+          CONFIG_TARGET_ALL_PROFILES=y
+          CONFIG_TARGET_PER_DEVICE_ROOTFS=y
 
-            CONFIG_ATH11K_MEM_PROFILE_256M=y
+          CONFIG_ATH11K_MEM_PROFILE_256M=y
 
-            CONFIG_IB=y
-            # CONFIG_IB_STANDALONE is not set
-            CONFIG_SDK=y
-            CONFIG_MAKE_TOOLCHAIN=y
+          CONFIG_IB=y
+          # CONFIG_IB_STANDALONE is not set
+          CONFIG_SDK=y
+          CONFIG_MAKE_TOOLCHAIN=y
 
-            CONFIG_REPRODUCIBLE_DEBUG_INFO=y
+          CONFIG_REPRODUCIBLE_DEBUG_INFO=y
 
-            CONFIG_PACKAGE_kmod-qca-nss-ecm-standard=y
-            CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
+          CONFIG_PACKAGE_kmod-qca-nss-ecm-standard=y
+          CONFIG_PACKAGE_kmod-qca-nss-drv-pppoe=y
 
-            CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci=y
           EOF
+          
           make defconfig
 
-      - name: Download
+      - name: Download sources
         run: |
-          make -j16 download
-
-      - name: Build tools
-        run: |
-          make -j$(nproc) tools/install
+          make -j$(nproc) download
 
       - name: Build toolchain
         run: |
+          make -j$(nproc) tools/install
           make -j$(nproc) toolchain/install
 
-      - name: Build all
+      - name: Build firmware
         run: |
-          make -j$(nproc)
+          make -j$(nproc) V=s
 
-      - name: Upload bin to artifacts
-        uses: actions/upload-artifact@v3
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: bin-ipq50xx-arm
-          path: bin/targets/ipq50xx/arm/*
+          name: firmware-ipq50xx
+          path: |
+            bin/targets/ipq50xx/arm/
+            !bin/targets/ipq50xx/arm/packages/
+          compression-level: 9
+          if-no-files-found: error
 
-      - name: Upload dl to artifacts
-        uses: actions/upload-artifact@v3
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: dl
-          path: dl/*
+          name: packages-ipq50xx
+          path: bin/targets/ipq50xx/arm/packages/
+          compression-level: 9
+          if-no-files-found: error
 
   gh-pages:
-    needs: [ build ]
-    runs-on: ubuntu-20.04
+    needs: [build]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      BRANCH: ${{ github.ref_name }}
+      VERSION_FILE: bin/targets/ipq50xx/arm/version.buildinfo
+    
     steps:
-      - name: Checkout gh-pages
-        uses: actions/checkout@v3
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
         with:
-          path: 'gh-pages'
-          ref: 'gh-pages'
-          fetch-depth: 0
+          ref: gh-pages
+          path: gh-pages
 
-      - name: Configure the git user
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-
-      - name: Drop old versions
-        run: |
-          cd gh-pages
-          readarray -t old_version < <(git log --format='%h' -- "${GITHUB_REF_NAME}" | tail -n +10)
-          GIT_SEQUENCE_EDITOR="sed -i '1 i break'" git rebase --interactive --committer-date-is-author-date --root
-          for commit in "${old_version[@]}"; do
-            sed -i "/${commit}/d" .git/rebase-merge/git-rebase-todo
-          done
-          git rebase --continue
-
-      - name: Download bin from artifacts
-        uses: actions/download-artifact@v3
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: bin-ipq50xx-arm
-          path: bin/
+          name: firmware-ipq50xx
+          path: artifacts/firmware/
 
-      - name: Copy contents
-        run: |
-          version="$(cat "bin/version.buildinfo")"
-          mkdir -p "gh-pages/${GITHUB_REF_NAME}/${version}/"
-          cp -avr bin/packages/* "gh-pages/${GITHUB_REF_NAME}/${version}/"
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-ipq50xx
+          path: artifacts/packages/
 
-      - name: Commit
-        run: |
-          cd gh-pages
-          git add .
-          git commit -m "Add: ${GITHUB_REF_NAME}: $(cat ../bin/version.buildinfo)"
-
-      - name: Publish
+      - name: Prepare GitHub Pages content
         run: |
           cd gh-pages
-          git push -f origin gh-pages
+          
+          # 获取版本信息
+          BUILD_VERSION=$(cat "../artifacts/firmware/version.buildinfo" | head -1)
+          ARCH="ipq50xx/arm"
+          
+          # 创建目录结构
+          mkdir -p "${BRANCH}/${BUILD_VERSION}/${ARCH}/"
+          
+          # 复制文件
+          cp -r ../artifacts/packages/* "${BRANCH}/${BUILD_VERSION}/${ARCH}/"
+          
+          # 更新索引文件
+          if [ ! -f "${BRANCH}/index.html" ]; then
+            cat > "${BRANCH}/index.html" << HTML
+            <!DOCTYPE html>
+            <html>
+            <head><title>Builds for $BRANCH</title></head>
+            <body>
+              <h1>Builds for branch: $BRANCH</h1>
+              <ul>
+            HTML
+          fi
+          
+          # 更新索引
+          echo "<li><a href=\"${BUILD_VERSION}/\">${BUILD_VERSION}</a> ($(date))</li>" >> "${BRANCH}/index.html"
+          
+          # 保持最多10个版本
+          ls -dt "${BRANCH}"/*/ 2>/dev/null | tail -n +11 | xargs rm -rf
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: gh-pages
+          publish_branch: gh-pages
+          force_orphan: false
+          commit_message: "Deploy: ${{ github.ref_name }} - $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
 
   release:
-    needs: [ build ]
-    runs-on: ubuntu-20.04
+    needs: [build]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      BUILD_TIME: ${{ github.event.repository.updated_at || github.event.repository.created_at }}
+    
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Download dl from artifacts
-        uses: actions/download-artifact@v3
+      - name: Download firmware artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: dl
-          path: dl/
+          name: firmware-ipq50xx
+          path: release/
 
-      - name: Download bin from artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: bin-ipq50xx-arm
-          path: bin/targets/ipq50xx/arm/
-
-      - name: Tar
+      - name: Generate release information
         run: |
-          tar cvf dl.tar -C dl/ .
-          tar cvf bin-ipq50xx.tar -C bin/targets/ipq50xx/arm/ .
-
-      - name: Generate release informations
-        run: |
-          TIME="$(curl "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" | jq -r .created_at)"
-
-          TAG="ci-${GITHUB_REF_NAME}-$(date -d "${TIME}" -u +'%Y%m%d-%H%M%S-%Z')"
-          echo "TAG=$TAG" >>$GITHUB_ENV
-
-          cat <<EOF | sed -E 's/^  //' >Release.md
-            CI ${GITHUB_REF_NAME} $(date -d "${TIME}" -u +'%Y-%m-%d %H:%M:%S %Z(%:z)')
-
-            # ${GITHUB_REF_NAME}
-
-            Build time: \`$(date -d "${TIME}" -u +'%Y-%m-%d %H:%M:%S %Z(%:z)')\`
-            Release version: ${TAG}
-
-            ## Sources
-            $(cat bin/targets/ipq50xx/arm/feeds.buildinfo | awk -F'[ ^]' '{printf "%s: `%s`\n", $2, $4}')
-
-            ## SHA256
-            $(cat bin/targets/ipq50xx/arm/sha256sums | awk '{printf "%s: `%s`\n", $2, $1}' | sed -E 's/^\*//')
+          BUILD_TIME="${BUILD_TIME:-$(date -u -Iseconds)}"
+          TAG_NAME="ci-${{ github.ref_name }}-$(date -d "${BUILD_TIME}" -u +'%Y%m%d-%H%M%S-UTC')"
+          echo "TAG_NAME=${TAG_NAME}" >> $GITHUB_ENV
+          
+          # 生成 Release 说明
+          cat > RELEASE_NOTES.md << 'EOF'
+          # CI Build - ${{ github.ref_name }}
+          
+          **Build Time:** $(date -d "${BUILD_TIME}" -u +'%Y-%m-%d %H:%M:%S %Z')
+          **Release Tag:** ${TAG_NAME}
+          **Commit:** [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+          
+          ## Target
+          - **Platform:** ipq50xx (ARM)
+          - **Profiles:** All available profiles
+          
+          ## Included Features
+          - LuCI Web Interface
+          - NSS-ECM acceleration
+          - NSS-PPPoE support
+          
+          ## Checksums
+          \`\`\`
+          $(cat release/sha256sums)
+          \`\`\`
+          
+          ## Build Information
+          $(cat release/feeds.buildinfo | awk -F'[ ^]' '{printf "- %s: `%s`\n", $2, $4}')
           EOF
 
-          echo "NAME=$(head --line=1 Release.md)" >>$GITHUB_ENV
-          tail --line=+2 Release.md >Body.md
-
-      - name: Release
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ env.TAG }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ env.NAME }}
-          body_path: Body.md
+          tag_name: ${{ env.TAG_NAME }}
+          name: "CI Build - ${{ github.ref_name }}"
+          body_path: RELEASE_NOTES.md
           files: |
-            bin/targets/ipq50xx/arm/sha256sums
-            bin/targets/ipq50xx/arm/*.*
-            *.tar
+            release/sha256sums
+            release/openwrt-*
+            release/*.bin
+            release/*.gz
+            release/*.manifest
+          draft: false
+          prerelease: false
